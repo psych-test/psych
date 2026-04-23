@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>심층 심리 분석 전문가 시스템 (관리자용)</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root { --primary: #3730a3; --bg: #f8fafc; --white: #ffffff; --border: #e2e8f0; }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, 'Apple SD Gothic Neo', sans-serif; }
+        body { background: var(--bg); color: #1e293b; line-height: 1.7; }
+        .wrapper { display: flex; flex-direction: column; min-height: 100vh; }
+        .sidebar { width: 100%; background: var(--white); border-bottom: 1px solid var(--border); padding: 20px; }
+        .main-content { flex: 1; padding: 20px; }
+        @media (min-width: 1024px) {
+            .wrapper { flex-direction: row; }
+            .sidebar { width: 380px; height: 100vh; position: sticky; top: 0; overflow-y: auto; border-right: 1px solid var(--border); }
+            .main-content { padding: 40px; }
+        }
+        .card { background: var(--white); padding: 25px; border-radius: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); margin-bottom: 25px; border: 1px solid #f1f5f9; }
+        .btn { width: 100%; padding: 14px; background: var(--primary); color: white; border: none; border-radius: 10px; font-weight: 600; cursor: pointer; font-size: 16px; margin-top: 10px; }
+        .user-item { padding: 15px; border: 1.5px solid var(--border); border-radius: 12px; margin-bottom: 10px; background: #fff; cursor: pointer; }
+        .user-item.active { border-color: var(--primary); background: #f5f3ff; }
+        .chart-container { position: relative; height: 350px; width: 100%; margin: 20px 0; }
+        
+        /* 분석 섹션 스타일 */
+        .analysis-item { margin-bottom: 20px; padding: 20px; border-radius: 12px; background: #fff; border: 1px solid #eee; border-left-width: 6px; }
+        .v-high { border-left-color: #1e3a8a; background: #f0f7ff; } 
+        .high { border-left-color: #4338ca; background: #f5f3ff; }
+        .mid { border-left-color: #3b82f6; background: #f0f9ff; }
+        .low { border-left-color: #64748b; background: #f8fafc; }
+        .v-low { border-left-color: #94a3b8; background: #fdfdfd; }
+
+        .score-badge { font-size: 0.8em; padding: 4px 12px; border-radius: 20px; color: white; font-weight: bold; float: right; }
+        .v-high .score-badge { background: #1e3a8a; } .high .score-badge { background: #4338ca; }
+        .mid .score-badge { background: #3b82f6; } .low .score-badge { background: #64748b; }
+        .v-low .score-badge { background: #94a3b8; }
+
+        .description { font-size: 0.95em; color: #334155; white-space: pre-line; margin-top: 10px; }
+        .lp-summary-box { background: #eff6ff; padding: 25px; border-radius: 15px; border: 1px solid #bfdbfe; margin-bottom: 30px; }
+        .training-tip { margin-top: 15px; padding: 15px; background: #ffffff; border-radius: 10px; border-left: 4px solid #10b981; font-size: 0.92em; box-shadow: 0 2px 4px rgba(0,0,0,0.02); }
+    </style>
+</head>
+<body>
+
+<div class="wrapper">
+    <div class="sidebar">
+        <h2 style="margin-bottom:20px; color:var(--primary);">전문가용 심리 관리자</h2>
+        <input type="text" id="inputCode" style="width:100%; padding:12px; border:1.5px solid var(--border); border-radius:10px; margin-bottom:10px;" placeholder="데이터 코드를 입력하세요">
+        <button class="btn" onclick="decodeAndAdd()">리포트 정밀 분석</button>
+        <div id="userList" style="margin-top:25px;"></div>
+    </div>
+
+    <div class="main-content" id="detailView" style="display:none;">
+        <div class="card">
+            <h2 id="viewName">심층 심리 리포트</h2>
+            <p id="viewInfo" style="color:#64748b; font-size:0.9em;"></p>
+            <div class="chart-container"><canvas id="resultChart"></canvas></div>
+        </div>
+
+        <div id="analysisContainer"></div>
+
+        <div class="card">
+            <h3>종합 관리 제언</h3>
+            <textarea id="adminMemo" style="width:100%; height:150px; padding:15px; border-radius:12px; border:1.5px solid var(--border); margin:15px 0; font-size:16px;" placeholder="내담자의 변화 양상과 향후 상담 목표를 기록하세요"></textarea>
+            <button class="btn" onclick="saveMemo()">리포트 영구 저장</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    let db = JSON.parse(localStorage.getItem('Psych_Expert_DB_V6')) || [];
+    let activeIdx = null;
+    let myChart = null;
+
+    const expertData = {
+        EGO: {
+            CP: { name: "통제적 부모 자아 (CP)", ranges: [
+                { min: 45, label: "매우 높음", text: "지나치게 엄격한 가치관을 가지고 있으며 완벽주의적 성향이 지배적입니다. 자신뿐만 아니라 타인에게도 높은 기준을 강요하여 위압감을 줄 수 있으며, 이는 대인관계의 갈등과 높은 내부 스트레스의 원인이 됩니다. '반드시 ~해야만 한다'는 당위적 사고를 완화하는 훈련이 필요합니다." },
+                { min: 35, label: "높음", text: "도덕성과 책임감이 강하고 질서를 중시합니다. 리더십이 있으나 때로 독단적이라는 평가를 받을 수 있으므로 타인의 의견을 경청하는 태도가 요구됩니다." },
+                { min: 25, label: "보통", text: "상식적인 선에서 질서를 준수하며 필요할 때 적절한 비판을 할 수 있는 균형 잡힌 상태입니다." },
+                { min: 0, label: "낮음", text: "규율이나 책임에 무관심해 보일 수 있으며 타인의 잘못에 대해 방관하거나 우유부단한 태도를 보일 수 있습니다." }]
+            },
+            NP: { name: "양육적 부모 자아 (NP)", ranges: [
+                { min: 45, label: "매우 높음", text: "헌신적이고 희생적이지만, 타인의 자립심을 저해하는 '과잉보호'의 위험이 큽니다. 상대방이 스스로 해결할 기회를 빼앗고 있지는 않은지 점검이 필요합니다." },
+                { min: 35, label: "높음", text: "공감 능력이 탁월하며 수용적인 태도로 주변 사람들에게 정서적 안정감을 제공합니다." },
+                { min: 25, label: "보통", text: "타인을 적절히 배려하면서도 개인의 경계를 유지할 줄 아는 건강한 조력자의 모습입니다." },
+                { min: 0, label: "낮음", text: "타인에게 냉담하거나 사무적인 태도를 보이며 정서적 유대감 형성에 어려움을 겪을 수 있습니다." }]
+            },
+            A: { name: "어른 자아 (A)", ranges: [
+                { min: 45, label: "매우 높음", text: "극도로 이성적이며 감정을 배제한 판단을 내립니다. 인간미가 부족하다는 평가를 받을 수 있으며, 모든 것을 데이터와 논리로만 해결하려 합니다." },
+                { min: 35, label: "높음", text: "현실 판단력이 우수하고 효율적으로 문제를 해결합니다. 감정에 휘둘리지 않는 철저한 계획성을 보입니다." },
+                { min: 25, label: "보통", text: "현실적이고 합리적이며, 일상적인 과업을 지혜롭게 수행합니다." },
+                { min: 0, label: "낮음", text: "충동에 좌우되기 쉽고 현실 판단력이 부족하여 계획성 없는 생활을 할 가능성이 높습니다." }]
+            },
+            FC: { name: "자유로운 어린이 자아 (FC)", ranges: [
+                { min: 45, label: "매우 높음", text: "매우 본능적이고 자기중심적인 돌발 행동을 할 수 있습니다. 즐거움을 추구하는 에너지는 높으나 주변 상황을 고려하지 않아 마찰이 생길 수 있습니다." },
+                { min: 35, label: "높음", text: "창의적이고 낙천적이며 유머 감각이 뛰어납니다. 삶의 활력을 주도적으로 찾아냅니다." },
+                { min: 25, label: "보통", text: "자발적이고 솔직한 감정 표현이 가능하며 적절한 생동감을 유지합니다." },
+                { min: 0, label: "낮음", text: "감정을 억제하고 위축되어 있으며 즐거움을 느끼는 능력이 저하되어 우울감을 느끼기 쉽습니다." }]
+            },
+            AC: { name: "순응하는 어린이 자아 (AC)", ranges: [
+                { min: 45, label: "매우 높음", text: "타인의 눈치를 과도하게 보며 거절을 전혀 하지 못합니다. 내면의 억압된 분노가 신체화 증상으로 나타날 위험이 매우 높은 상태입니다." },
+                { min: 35, label: "높음", text: "조직에 잘 순응하고 협조적이지만 내면에는 갈등이 쌓여 있을 가능성이 높습니다." },
+                { min: 25, label: "보통", text: "예의 바르고 사회적 조화를 중시하며 상황에 맞게 자신을 조절합니다." },
+                { min: 0, label: "낮음", text: "반항적이고 독단적이며 타인과의 협조가 어려운 상태일 수 있습니다." }]
+            }
+        },
+        LP: {
+            U_P: { name: "자기긍정 (I am OK)", ranges: [
+                { min: 40, label: "매우 높음", text: "자신의 가치에 대해 확고한 확신을 가지고 있습니다. 실패 상황에서도 자아를 존중하며, 스스로에 대한 신뢰가 매우 높습니다. 다만 과도할 경우 타인의 조언을 무시할 수 있으니 주의가 필요합니다." },
+                { min: 30, label: "높음", text: "자신을 긍정적으로 바라보며 당당하게 의견을 표현합니다. 자존감이 안정적이고 건강한 상태입니다." },
+                { min: 20, label: "보통", text: "상황에 따라 자신감이 변동되기도 하지만 대체로 자신을 수용하는 평범한 수준입니다." },
+                { min: 0, label: "낮음", text: "자신을 비하하거나 부족하다고 느끼는 경향이 있습니다. 작은 실수에도 자책하기 쉬우며 타인의 평가에 지나치게 민감할 수 있습니다." }]
+            },
+            U_N: { name: "자기부정 (I am NOT OK)", ranges: [
+                { min: 40, label: "매우 높음", text: "내면의 열등감이 매우 깊고 스스로를 무가치하다고 여깁니다. 우울감이나 불안이 높을 수 있으며, 타인 앞에 서는 것을 극도로 두려워할 가능성이 큽니다." },
+                { min: 30, label: "높음", text: "스스로를 신뢰하지 못하고 위축되어 있습니다. 남들과 끊임없이 비교하며 불행을 느끼기 쉬운 상태입니다." },
+                { min: 20, label: "보통", text: "겸손한 편이지만 때로 자신감이 결여되는 지점이 있습니다." },
+                { min: 0, label: "낮음", text: "자기부정이 거의 없는 상태입니다. 자신의 단점까지도 객관적으로 수용하거나 크게 개의치 않습니다." }]
+            },
+            O_P: { name: "타인긍정 (You are OK)", ranges: [
+                { min: 40, label: "매우 높음", text: "타인에 대한 개방성과 신뢰가 매우 높습니다. 모든 사람을 긍정적으로 수용하려 하지만, 때로 사기를 당하거나 이용당할 위험이 있으니 현실적인 경계가 필요합니다." },
+                { min: 30, label: "높음", text: "인간관계가 원만하고 협력적입니다. 타인의 장점을 발견하는 능력이 뛰어나며 대화가 잘 통하는 성향입니다." },
+                { min: 20, label: "보통", text: "사회적 관계에서 기본적인 예의와 신뢰를 유지하는 표준적인 상태입니다." },
+                { min: 0, label: "낮음", text: "타인을 비판적으로 보거나 의심하는 경향이 있습니다. 사람들과 깊이 있는 관계를 맺는 것을 부담스러워할 수 있습니다." }]
+            },
+            O_N: { name: "타인부정 (You are NOT OK)", ranges: [
+                { min: 40, label: "매우 높음", text: "타인을 불신하고 적대적으로 대하거나 무시하는 성향이 강합니다. 지배적이고 공격적인 태도로 주변 사람들에게 상처를 줄 수 있으며 갈등의 중심이 되기 쉽습니다." },
+                { min: 30, label: "높음", text: "냉소적이고 비판적인 시각으로 사람들을 바라봅니다. 타인의 실수를 용납하기 힘들어하며 독단적인 모습을 보일 수 있습니다." },
+                { min: 20, label: "보통", text: "필요에 따라 타인에게 비판을 가하지만 감정적인 공격성은 절제된 상태입니다." },
+                { min: 0, label: "낮음", text: "타인을 부정적으로 보지 않습니다. 상대를 있는 그대로 인정하고 존중하려 노력하는 태도입니다." }]
+            }
+        }
+    };
+
+    function decodeAndAdd() {
+        const code = document.getElementById('inputCode').value.trim();
+        try {
+            const decoded = JSON.parse(decodeURIComponent(escape(atob(code))));
+            db.push(decoded);
+            localStorage.setItem('Psych_Expert_DB_V6', JSON.stringify(db));
+            document.getElementById('inputCode').value = '';
+            renderList();
+        } catch(e) { alert("코드를 다시 확인해 주세요."); }
+    }
+
+    function renderList() {
+        const list = document.getElementById('userList');
+        list.innerHTML = '';
+        db.forEach((item, i) => {
+            const div = document.createElement('div');
+            div.className = `user-item ${activeIdx === i ? 'active' : ''}`;
+            div.onclick = () => selectUser(i);
+            div.innerHTML = `<h4>${item.n} (${item.g})</h4><p style="font-size:0.85em; color:#666;">${item.d} | ${item.type === 'EGO' ? '에고그램' : '인생태도'}</p>`;
+            list.appendChild(div);
+        });
+    }
+
+    function selectUser(i) {
+        activeIdx = i;
+        const data = db[i];
+        document.getElementById('detailView').style.display = 'block';
+        document.getElementById('viewName').innerText = `${data.n} 님의 심층 심리 리포트`;
+        document.getElementById('viewInfo').innerText = `${data.a}세 | ${data.g}성 | 검사일: ${data.d}`;
+        document.getElementById('adminMemo').value = data.memo || '';
+        renderChart(data);
+        renderExpertAnalysis(data);
+        renderList();
+        if(window.innerWidth < 1024) document.getElementById('detailView').scrollIntoView({behavior: "smooth"});
+    }
+
+    function renderExpertAnalysis(data) {
+        const container = document.getElementById('analysisContainer');
+        container.innerHTML = '';
+        
+        if(data.type === 'LP') {
+            const s = data.s;
+            let title = "", desc = "", tip = "";
+            // 4분면 진단 강화
+            if(s.U_P >= 30 && s.O_P >= 30) {
+                title = "I+ U+ (자기긍정-타인긍정): 건강한 조화형";
+                desc = "나와 타인 모두를 소중히 여기는 가장 이상적인 상태입니다. 건설적이고 개방적인 태도를 지녀 원만한 대인관계와 정서적 안정을 누리고 있습니다. 갈등 해결 능력이 뛰어나며 자아 실현 의지가 강합니다.";
+                tip = "현재의 균형 잡힌 태도를 유지하며 리더로서 주변에 긍정적인 영향력을 전파하세요.";
+            } else if(s.U_P >= 30 && s.O_P < 30) {
+                title = "I+ U- (자기긍정-타인부정): 지배적 투사형";
+                desc = "나는 옳고 남은 틀렸다고 생각하는 독단적인 태도입니다. 자부심은 높으나 타인을 비판하거나 무시하여 고립될 위험이 큽니다. 자신의 문제를 남의 탓으로 돌리는 경향이 있을 수 있습니다.";
+                tip = "상대방의 의견에 경청하고, 다름이 틀림이 아님을 인정하는 수용성 훈련이 필요합니다.";
+            } else if(s.U_P < 30 && s.O_P >= 30) {
+                title = "I- U+ (자기부정-타인긍정): 의존형/자기희생형";
+                desc = "남은 훌륭하고 나는 부족하다고 느끼는 태도입니다. 타인의 인정에 지나치게 목말라하며 거절을 못하고 희생하는 경향이 있습니다. 내면의 억압된 분노가 쌓여 무기력해질 수 있습니다.";
+                tip = "자신의 사소한 장점부터 기록하고 'No'라고 말할 수 있는 단호함 훈련이 중요합니다.";
+            } else {
+                title = "I- U- (자기부정-타인부정): 허무적 회피형";
+                desc = "나도 싫고 세상도 싫은 체념한 상태입니다. 극심한 고립감이나 허무주의에 빠지기 쉬우며, 대인관계를 아예 회피할 수 있습니다. 삶의 에너지가 매우 낮은 위기 상태일 수 있습니다.";
+                tip = "전문적인 상담과 병행하여 산책이나 취미 활동 등 아주 작은 즐거움부터 회복하는 에너지가 필요합니다.";
+            }
+            const box = document.createElement('div');
+            box.className = 'lp-summary-box';
+            box.innerHTML = `<h3 style="color:var(--primary); margin-bottom:10px;">${title}</h3><p class="description">${desc}</p><div class="training-tip"><b>💡 관리 가이드:</b> ${tip}</div>`;
+            container.appendChild(box);
+        }
+
+        // 공통 지표별 정밀 해석 (에고그램과 동일한 방식)
+        const type = data.type === 'EGO' ? 'EGO' : 'LP';
+        for(let key in expertData[type]) {
+            const score = data.s[key];
+            const meta = expertData[type][key];
+            const range = meta.ranges.find(r => score >= r.min) || meta.ranges[meta.ranges.length - 1];
+            const levelClass = score >= 40 ? 'v-high' : (score >= 30 ? 'high' : (score >= 20 ? 'mid' : (score >= 10 ? 'low' : 'v-low')));
+            const div = document.createElement('div');
+            div.className = `analysis-item ${levelClass}`;
+            div.innerHTML = `<div><span class="score-badge">${score}점 [${range.label}]</span><strong>${meta.name}</strong></div><div class="description">${range.text}</div>`;
+            container.appendChild(div);
+        }
+    }
+
+    function renderChart(data) {
+        const ctx = document.getElementById('resultChart').getContext('2d');
+        if(myChart) myChart.destroy();
+        const labels = data.type === 'EGO' ? ['CP', 'NP', 'A', 'FC', 'AC'] : ['U_P', 'U_N', 'O_P', 'O_N'];
+        myChart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: '점수',
+                    data: labels.map(l => data.s[l]),
+                    backgroundColor: 'rgba(55, 48, 163, 0.7)',
+                    borderColor: '#3730a3',
+                    borderWidth: 2,
+                    borderRadius: 8
+                }]
+            },
+            options: { 
+                responsive: true, maintainAspectRatio: false, 
+                scales: { y: { beginAtZero: true, max: 50, grid: { color: '#f1f5f9' } }, x: { grid: { display: false } } },
+                plugins: { legend: { display: false } }
+            }
+        });
+    }
+
+    function saveMemo() {
+        if(activeIdx === null) return;
+        db[activeIdx].memo = document.getElementById('adminMemo').value;
+        localStorage.setItem('Psych_Expert_DB_V6', JSON.stringify(db));
+        alert("리포트가 안전하게 저장되었습니다.");
+    }
+
+    renderList();
+</script>
+</body>
+</html>
+
+
